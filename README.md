@@ -20,7 +20,7 @@ Companion daemon to Windows Tdarr Nodes
 ## Installation
 
 - Download AutoHotKey from above and Install it.
-- [get latest Source]() 
+- [get latest Source](https://github.com/ArchemedIan/TdarrNodeControl/releases/download/beta/TdarrNodeControl_Beta1.ahk) 
 - Compile TdarrNodeControl.ahk (Right-click > Compile)
 - Place EXE in same folder as Tdarr_Node.exe
 
