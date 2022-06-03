@@ -4,7 +4,27 @@ SendMode Input  ; Recommended for new scripts due to its superior speed and reli
 SetWorkingDir %A_ScriptDir%  ; Ensures a consistent starting directory.
 #Persistent
 #SingleInstance Force
+SplitPath, A_ScriptFullPath, ScriptFileName, ScriptDir, ScriptExtension, ScriptNameNoExt, ScriptDrive
 
+global ScriptNameNoExt
+
+
+IfNotExist, %A_ScriptDir%/%ScriptNameNoExt%.ini
+{
+	;IniWrite, Value, Filename, Section, Key
+	msgbox ini not found, creating.
+	EnvGet, ProcessorCount, NUMBER_OF_PROCESSORS 
+	IniWrite, %ProcessorCount%, %A_ScriptDir%/%ScriptNameNoExt%.ini, Config, Core Limit
+	IniWrite, 3, %A_ScriptDir%/%ScriptNameNoExt%.ini, Config, Priority
+	IniWrite, 1, %A_ScriptDir%/%ScriptNameNoExt%.ini, Config, Reverse Core Limit
+	IniWrite, 1, %A_ScriptDir%/%ScriptNameNoExt%.ini, Config, Apply On Start
+}
+
+;IniRead, OutputVar, Filename, Section, Key
+IniRead, ConfigCoreLimit, %A_ScriptDir%/%ScriptNameNoExt%.ini, Config, Core Limit
+IniRead, ConfigPriority, %A_ScriptDir%/%ScriptNameNoExt%.ini, Config, Priority
+IniRead, CLorder, %A_ScriptDir%/%ScriptNameNoExt%.ini, Config, Reverse Core Limit
+IniRead, AutoApplyOnStart, %A_ScriptDir%/%ScriptNameNoExt%.ini, Config, Apply On Start
 
 FileRead, NodeConfigJson, %A_ScriptDir%/../configs/Tdarr_Node_Config.json
 ;msgbox % NodeConfigJson
@@ -13,8 +33,10 @@ NodeID := NodeConfig.nodeID
 NodeIP := NodeConfig.serverIP
 NodePort:= NodeConfig.serverPort
 NodeURL = http://%NodeIP%:%NodePort%
+global CLOrder
 ;msgbox % NodeURL
 gosub MenuInit
+gosub Init
 SetTimer, IsNodeRunning, 1000
 ;SetTimer, WorkerLimits, 15000
 
@@ -52,30 +74,36 @@ MenuInit:
 	Menu, Tray, Add, Worker Limits, :Workers
 	
 
-	;need to loop through cpu count and make core control
+;need to loop through cpu count and make core control
 	EnvGet, ProcessorCount, NUMBER_OF_PROCESSORS
 	loop, %ProcessorCount%
 	{
-		CCC%A_Index% := Func("CCC").Bind(A_Index)
+		CCC%A_Index% := Func("CCCv2").Bind(A_Index, CLOrder)
 		Menu, Cores, Add, %A_Index%, % CCC%A_Index%
 	}
+	Menu, Cores, Add
+	Menu, Cores, Add, Reverse, ToggleClOrder
+	if (CLOrder = 0)
+		Menu, Cores, Uncheck, Reverse
+	else
+		Menu, Cores, Check, Reverse
+		
 	Menu, Cores, Check, %ProcessorCount%
 	Menu, Tray, Add, Core Limit, :Cores
 	
-	;need to make priority control menu
-	;Set := Func("GivePar").Bind("First", "Test one")
+;need to make priority control menu
 	;L (or Low), B (or BelowNormal), N (or Normal), A (or AboveNormal), H (or High), R (or Realtime)
-	p6 := Func("PriorityChange").Bind(6)
+	p6 := Func("PriorityChangev2").Bind(6)
 	Menu, Priority, Add, Realtime, % p6
-	p5 := Func("PriorityChange").Bind(5)
+	p5 := Func("PriorityChangev2").Bind(5)
 	Menu, Priority, Add, High, % p5
-	p4 := Func("PriorityChange").Bind(4)
+	p4 := Func("PriorityChangev2").Bind(4)
 	Menu, Priority, Add, AboveNormal, % p4
-	p3 := Func("PriorityChange").Bind(3)
+	p3 := Func("PriorityChangev2").Bind(3)
 	Menu, Priority, Add, Normal, % p3
-	p2 := Func("PriorityChange").Bind(2)
+	p2 := Func("PriorityChangev2").Bind(2)
 	Menu, Priority, Add, BelowNormal, % p2
-	p1 := Func("PriorityChange").Bind(1)
+	p1 := Func("PriorityChangev2").Bind(1)
 	Menu, Priority, Add, Low, % p1
 	Menu, Tray, Add, Priority, :Priority
 
@@ -90,6 +118,16 @@ MenuInit:
 	}
 	return
 }
+
+Init:
+{
+	
+	CCCv2(ConfigCoreLimit)
+	PriorityChangev2(ConfigPriority)
+
+	return
+}
+
 
 TestFunction()
 {
@@ -118,6 +156,10 @@ PriorityChange(Level)
 	If (Level = 6)
 		Level = R
 	
+	
+	
+	
+	
 	Process, Exist, Tdarr_Node.exe
 	NodePID := ErrorLevel
 	If (NodePID > 0)
@@ -125,6 +167,139 @@ PriorityChange(Level)
 	return
 }
 
+PriorityChangev2(Level)
+{
+	Global ConfigPriority := Level
+	IniWrite, %ConfigPriority%, %A_ScriptDir%/%ScriptNameNoExt%.ini, Config, Priority
+	;L (or Low), B (or BelowNormal), N (or Normal), A (or AboveNormal), H (or High), R (or Realtime)
+	If (Level = 1)
+	{
+		Level = L
+		Menu, Priority, Uncheck, Realtime
+		Menu, Priority, Uncheck, High
+		Menu, Priority, Uncheck, AboveNormal	
+		Menu, Priority, Uncheck, Normal	
+		Menu, Priority, Uncheck, BelowNormal	
+		Menu, Priority, Check, Low
+	}
+	If (Level = 2)
+	{
+		Level = B
+		Menu, Priority, Uncheck, Realtime
+		Menu, Priority, Uncheck, High
+		Menu, Priority, Uncheck, AboveNormal	
+		Menu, Priority, Uncheck, Normal	
+		Menu, Priority, Check, BelowNormal	
+		Menu, Priority, Uncheck, Low
+	}
+	If (Level = 3)
+	{
+		Level = N
+		Menu, Priority, Uncheck, Realtime
+		Menu, Priority, Uncheck, High
+		Menu, Priority, Uncheck, AboveNormal	
+		Menu, Priority, Check, Normal	
+		Menu, Priority, Uncheck, BelowNormal	
+		Menu, Priority, Uncheck, Low
+	}
+	If (Level = 4)
+	{
+		Level = A
+		Menu, Priority, Uncheck, Realtime
+		Menu, Priority, Uncheck, High
+		Menu, Priority, Check, AboveNormal	
+		Menu, Priority, Uncheck, Normal	
+		Menu, Priority, Uncheck, BelowNormal	
+		Menu, Priority, Uncheck, Low
+	}
+	If (Level = 5)
+	{
+		Level = H
+		Menu, Priority, Uncheck, Realtime
+		Menu, Priority, Check, High
+		Menu, Priority, Uncheck, AboveNormal	
+		Menu, Priority, Uncheck, Normal	
+		Menu, Priority, Uncheck, BelowNormal	
+		Menu, Priority, Uncheck, Low
+	}
+	If (Level = 6)
+	{
+		Level = R
+		Menu, Priority, Check, Realtime
+		Menu, Priority, Uncheck, High
+		Menu, Priority, Uncheck, AboveNormal	
+		Menu, Priority, Uncheck, Normal	
+		Menu, Priority, Uncheck, BelowNormal	
+		Menu, Priority, Uncheck, Low
+	}
+	
+
+	global ffmpegPids := []
+	global tWorkerPids := []
+	global LocalPriority := Level
+;Find node workers and parent
+	for proc in ComObjGet("winmgmts:").ExecQuery("Select * from Win32_Process WHERE Name = 'Tdarr_Node.exe'")
+	{
+		name := proc.Name
+		cmd := proc.CommandLine
+		pid := proc.ProcessId
+		;msgbox name: %name%`n cmd: %pid%
+		Haystack := cmd
+		Needle := "worker"
+		If InStr(Haystack, Needle)
+			{
+				tWorkerPids.Push(pid)
+			}
+		else
+			{
+				global tParentPid := pid
+			}
+	}
+;Find ffmpegs
+	for proc in ComObjGet("winmgmts:").ExecQuery("Select * from Win32_Process WHERE Name = 'ffmpeg.exe'")
+	{
+		name := proc.Name
+		;cmd := proc.CommandLine
+		pid := proc.ProcessId
+		;msgbox name: %name%`n cmd: %pid%
+		ffmpegPids.Push(pid)
+	}
+	
+	
+;change parent
+	;msgbox Tdarr_Node parent pid is %tParentPid%
+	Process, Exist, % tParentPid
+	ParentNodePID := ErrorLevel
+	If (ParentNodePID > 0)
+	{
+		Process, Priority, % ParentNodePID, % LocalPriority
+	}
+	
+;change workers
+	for index, This_tWorker in tWorkerPids 
+	{
+		;MsgBox % "tWorker " . index . " is " . This_tWorker 
+		Process, Exist, % This_tWorker
+		ThisNodePID := ErrorLevel
+		If (ThisNodePID > 0)
+		{
+			Process, Priority, % ThisNodePID, % LocalPriority
+		}
+	}
+;change ffmpegs
+	for index, This_ffmpeg in ffmpegPids 
+	{
+		;MsgBox % "ffmpeg " . index . " is " . This_ffmpeg
+		Process, Exist, % This_ffmpeg
+		ThisFfmpegPID := ErrorLevel
+		If (ThisFfmpegPID > 0)
+		{
+			Process, Priority, % ThisFfmpegPID, % LocalPriority
+		}
+	}
+	
+	return
+}
 
 CCC(CoreLimit)
 {
@@ -152,6 +327,111 @@ CCC(CoreLimit)
 	return
 }
 
+CCCv2(CoreLimit)
+{
+	IniWrite, %CoreLimit%, %A_ScriptDir%/%ScriptNameNoExt%.ini, Config, Core Limit
+	global ConfigCoreLimit := CoreLimit
+	loop %CoreLimit%
+	{
+		if CoreLimitBinary
+			CoreLimitBinary=1%CoreLimitBinary%
+		else
+			CoreLimitBinary=1
+	}
+	if (CLOrder = 1)
+	{
+		EnvGet, ProcessorCount, NUMBER_OF_PROCESSORS
+		if (CoreLimit <> ProcessorCount)
+		{
+			padding := ProcessorCount - CoreLimit
+			loop %padding%
+			{
+				CoreLimitBinary=%CoreLimitBinary%0
+			}
+		}
+	}
+	global CoreLimitDec := Dec(CoreLimitBinary)
+	
+	global ffmpegPids := []
+	global tWorkerPids := []
+	 
+;Find node workers and parent
+	for proc in ComObjGet("winmgmts:").ExecQuery("Select * from Win32_Process WHERE Name = 'Tdarr_Node.exe'")
+	{
+		name := proc.Name
+		cmd := proc.CommandLine
+		pid := proc.ProcessId
+		;msgbox name: %name%`n cmd: %pid%
+		Haystack := cmd
+		Needle := "worker"
+		If InStr(Haystack, Needle)
+			{
+				tWorkerPids.Push(pid)
+			}
+		else
+			{
+				global tParentPid := pid
+			}
+	}
+;Find ffmpegs
+	for proc in ComObjGet("winmgmts:").ExecQuery("Select * from Win32_Process WHERE Name = 'ffmpeg.exe'")
+	{
+		name := proc.Name
+		;cmd := proc.CommandLine
+		pid := proc.ProcessId
+		;msgbox name: %name%`n cmd: %pid%
+		ffmpegPids.Push(pid)
+	}
+	
+	
+;change parent
+	;msgbox Tdarr_Node parent pid is %tParentPid%
+	Process, Exist, % tParentPid
+	ParentNodePID := ErrorLevel
+	If (ParentNodePID > 0)
+	{
+		;msgbox parent cl = %CoreLimitDec%`npid = %ParentNodePID%
+		Affinity_Set(CoreLimitDec,ParentNodePID)
+		EnvGet, ProcessorCount, NUMBER_OF_PROCESSORS
+		loop, %ProcessorCount%
+			Menu, Cores, Uncheck, %A_Index%
+		Menu, Cores, Check, %CoreLimit%
+	}
+;change workers
+	for index, This_tWorker in tWorkerPids 
+	{
+		;MsgBox % "tWorker " . index . " is " . This_tWorker 
+		Process, Exist, % This_tWorker
+		ThisNodePID := ErrorLevel
+		If (ThisNodePID > 0)
+		{
+			Affinity_Set(CoreLimitDec,ThisNodePID)
+			EnvGet, ProcessorCount, NUMBER_OF_PROCESSORS
+			loop, %ProcessorCount%
+				Menu, Cores, Uncheck, %A_Index%
+			Menu, Cores, Check, %CoreLimit%
+		}
+	}
+;change ffmpegs
+	for index, This_ffmpeg in ffmpegPids 
+	{
+		;MsgBox % "ffmpeg " . index . " is " . This_ffmpeg
+		Process, Exist, % This_ffmpeg
+		ThisFfmpegPID := ErrorLevel
+		If (ThisFfmpegPID > 0)
+		{
+			Affinity_Set(CoreLimitDec,ThisFfmpegPID)
+			EnvGet, ProcessorCount, NUMBER_OF_PROCESSORS
+			loop, %ProcessorCount%
+				Menu, Cores, Uncheck, %A_Index%
+			Menu, Cores, Check, %CoreLimit%
+		}
+	}
+	
+	return
+}
+
+
 Affinity_Set( CPU=1, PID=0x0 ) { ; CPU0=1 CPU1=2 | to use both, CPU should be 3
   Process, Exist, %PID%
   IfEqual,ErrorLevel,0,  SetEnv,PID,% DllCall( "GetCurrentProcessId" )
@@ -173,6 +453,21 @@ Dec(x){
 	loop,parse,x
 		r|=A_LoopField<<--b
 	return r
+}
+
+ToggleClOrder:
+{
+	if (CLOrder = 0)
+	{
+		global CLOrder := 1
+		Menu, Cores, Check, Reverse
+	}
+	else
+	{
+		global CLOrder := 0
+		Menu, Cores, Uncheck, Reverse
+	}
+	return
 }
 
 IsNodeRunning()
