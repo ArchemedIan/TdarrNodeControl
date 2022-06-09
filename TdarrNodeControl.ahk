@@ -26,6 +26,10 @@ IniRead, ConfigPriority, %A_ScriptDir%/%ScriptNameNoExt%.ini, Config, Priority
 IniRead, CLorder, %A_ScriptDir%/%ScriptNameNoExt%.ini, Config, Reverse Core Limit
 IniRead, AutoApplyOnStart, %A_ScriptDir%/%ScriptNameNoExt%.ini, Config, Apply On Start
 
+Global ConfigCoreLimit
+Global ConfigPriority
+Global CLorder
+
 FileRead, NodeConfigJson, %A_ScriptDir%/../configs/Tdarr_Node_Config.json
 ;msgbox % NodeConfigJson
 NodeConfig := JsonToAHK(NodeConfigJson)
@@ -37,21 +41,26 @@ global CLOrder
 ;msgbox % NodeURL
 gosub MenuInit
 gosub Init
-SetTimer, IsNodeRunning, 1000
+
+ChkInt := 750
+
+SetTimer, PIDMonitor, %ChkInt%
+
+;SetTimer, NodeRunningMonitor, 3000
+;SetTimer, NodePausedMonitor, 3000
 ;SetTimer, WorkerLimits, 15000
 
-
-
-
-
-
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Functions;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 return
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Functions;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 MenuInit:
 {
-	;Menu, Tray, Add, test, TestFunction
+	If !A_IsCompiled
+		Menu, Tray, Add
+	
 	Menu, Tray, Add, Run Node, RunToggle
+	;Menu, Tray, Add, Pause Node, PauseNodeToggle
 	Menu, Tray, Add, Show Console, ShowToggle
 	ShowTdarr := 0
 	Menu, Tray, Add
@@ -71,6 +80,7 @@ MenuInit:
 	
 	Menu, Workers, Add, Health Checks, :Health Checks
 	Menu, Workers, Add, Transcodes, :Transcodes	
+	Menu, Workers, Add, Refresh, MenuWorkerRefresh
 	Menu, Tray, Add, Worker Limits, :Workers
 	
 
@@ -78,8 +88,9 @@ MenuInit:
 	EnvGet, ProcessorCount, NUMBER_OF_PROCESSORS
 	loop, %ProcessorCount%
 	{
-		CCC%A_Index% := Func("CCCv2").Bind(A_Index, CLOrder)
-		Menu, Cores, Add, %A_Index%, % CCC%A_Index%
+		;CCC%A_Index% := Func("CCCv2").Bind(A_Index)
+		AfSet%A_Index% := Func("AfSet").Bind(A_Index)
+		Menu, Cores, Add, %A_Index%, % AfSet%A_Index%
 	}
 	Menu, Cores, Add
 	Menu, Cores, Add, Reverse, ToggleClOrder
@@ -93,17 +104,17 @@ MenuInit:
 	
 ;need to make priority control menu
 	;L (or Low), B (or BelowNormal), N (or Normal), A (or AboveNormal), H (or High), R (or Realtime)
-	p6 := Func("PriorityChangev2").Bind(6)
+	p6 := Func("PrioSet").Bind("R")
 	Menu, Priority, Add, Realtime, % p6
-	p5 := Func("PriorityChangev2").Bind(5)
+	p5 := Func("PrioSet").Bind("H")
 	Menu, Priority, Add, High, % p5
-	p4 := Func("PriorityChangev2").Bind(4)
+	p4 := Func("PrioSet").Bind("A")
 	Menu, Priority, Add, AboveNormal, % p4
-	p3 := Func("PriorityChangev2").Bind(3)
+	p3 := Func("PrioSet").Bind("N")
 	Menu, Priority, Add, Normal, % p3
-	p2 := Func("PriorityChangev2").Bind(2)
+	p2 := Func("PrioSet").Bind("B")
 	Menu, Priority, Add, BelowNormal, % p2
-	p1 := Func("PriorityChangev2").Bind(1)
+	p1 := Func("PrioSet").Bind("L")
 	Menu, Priority, Add, Low, % p1
 	Menu, Tray, Add, Priority, :Priority
 
@@ -119,62 +130,126 @@ MenuInit:
 	return
 }
 
-Init:
+init:
 {
-	
-	CCCv2(ConfigCoreLimit)
-	PriorityChangev2(ConfigPriority)
+	AfSet(ConfigCoreLimit)
+	PrioSet(ConfigPriority)
 
-	return
+return
 }
-
-
-TestFunction()
+PIDMonitor:
 {
-	msgbox test
-	return
-}
+	
+	ObjRelease(ffmpegPids)
 
-PriorityChange(Level)
-{
-	;L (or Low), B (or BelowNormal), N (or Normal), A (or AboveNormal), H (or High), R (or Realtime)
-	If (Level = 1)
-		Level = L
+	global ffmpegPids := []
 	
-	If (Level = 2)
-		Level = B
-	
-	If (Level = 3)
-		Level = N
-	
-	If (Level = 4)
-		Level = A
-	
-	If (Level = 5)
-		Level = H
-	
-	If (Level = 6)
-		Level = R
-	
-	
-	
-	
-	
-	Process, Exist, Tdarr_Node.exe
-	NodePID := ErrorLevel
-	If (NodePID > 0)
-		Process, Priority, % NodePID, % Level
-	return
-}
-
-PriorityChangev2(Level)
-{
-	Global ConfigPriority := Level
-	IniWrite, %ConfigPriority%, %A_ScriptDir%/%ScriptNameNoExt%.ini, Config, Priority
-	;L (or Low), B (or BelowNormal), N (or Normal), A (or AboveNormal), H (or High), R (or Realtime)
-	If (Level = 1)
+	;;;;;;;;;;Find node workers and parent
+	for proc in ComObjGet("winmgmts:").ExecQuery("Select * from Win32_Process WHERE Name = 'Tdarr_Node.exe'")
 	{
-		Level = L
+		name := proc.Name
+		cmd := proc.CommandLine
+		pid := proc.ProcessId
+		;msgbox name: %name%`n cmd: %pid%
+		Haystack := cmd
+		Needle := "worker"
+		If InStr(Haystack, Needle)
+				continue
+		else
+				global tParentPid := pid
+	}
+	ObjRelease(proc)
+	ObjRelease(cmd)
+	if (tParentPid > 0)
+		Menu, Tray, Check, Run Node
+	else
+		Menu, Tray, Uncheck, Run Node
+
+	;;;;;;;;;;;Find ffmpegs
+	for proc in ComObjGet("winmgmts:").ExecQuery("Select * from Win32_Process WHERE Name = 'ffmpeg.exe'")
+	{
+		pid := proc.ProcessId
+		ffmpegPids.Push(pid)
+	}
+	ObjRelease(proc)
+	
+	;;;;;;;;;;;change ffmpegs affinity
+	for index, This_ffmpeg in ffmpegPids 
+	{
+		;MsgBox % "ffmpeg " . index . " is " . This_ffmpeg
+		Process, Exist, % This_ffmpeg
+		ThisFfmpegPID := ErrorLevel
+		;msgbox pid is %ThisFfmpegPID%
+		If (ThisFfmpegPID > 0)
+		{
+			CurrentAf := Affinity_Get(ThisFfmpegPID)
+			;msgbox %ThisFfmpegPID%'s affinity is %CurrentAF%, config is %ConfigCoreLimitDec%
+			if (CurrentAf = ConfigCoreLimitDec)
+				continue
+			else
+				Affinity_Set(ConfigCoreLimitDec,ThisFfmpegPID)
+
+		}
+	}
+
+	;;;;;;;;;;;change ffmpegs priority
+	for index, This_ffmpeg in ffmpegPids 
+	{
+		;MsgBox % "ffmpeg " . index . " is " . This_ffmpeg
+		Process, Exist, % This_ffmpeg
+		ThisFfmpegPID := ErrorLevel
+		If (ThisFfmpegPID > 0)
+		{
+			CurrentPrio := GetPriority(ThisFfmpegPID)
+			if (CurrentPrio = ConfigPriority)
+				continue
+			Process, Priority, % ThisFfmpegPID, % ConfigPriority
+
+		}
+	}
+	return
+}
+
+AfSet(Affinity)
+{
+	IniWrite, %Affinity%, %A_ScriptDir%/%ScriptNameNoExt%.ini, Config, Core Limit
+	global ConfigCoreLimit := Affinity
+	loop %Affinity%
+	{
+		if CoreLimitBinary
+			CoreLimitBinary=1%CoreLimitBinary%
+		else
+			CoreLimitBinary=1
+	}
+	global ConfigCoreLimitBinary := CoreLimitBinary
+	if (CLOrder = 1)
+	{
+		EnvGet, ProcessorCount, NUMBER_OF_PROCESSORS
+		if (Affinity <> ProcessorCount)
+		{
+			padding := ProcessorCount - Affinity
+			loop %padding%
+			{
+				CoreLimitBinary=%CoreLimitBinary%0
+			}
+		}
+	}
+	global ConfigCoreLimitDec := Dec(CoreLimitBinary)
+	EnvGet, ProcessorCount, NUMBER_OF_PROCESSORS
+	loop, %ProcessorCount%
+		Menu, Cores, Uncheck, %A_Index%
+	Menu, Cores, Check, %ConfigCoreLimit%
+	
+
+return
+}
+
+PrioSet(Priority)
+{
+	;L (or Low), B (or BelowNormal), N (or Normal), A (or AboveNormal), H (or High), R (or Realtime)
+	If (Priority = 1 or Priority = "L")
+	{
+		Global ConfigPriority := "L"
 		Menu, Priority, Uncheck, Realtime
 		Menu, Priority, Uncheck, High
 		Menu, Priority, Uncheck, AboveNormal	
@@ -182,9 +257,9 @@ PriorityChangev2(Level)
 		Menu, Priority, Uncheck, BelowNormal	
 		Menu, Priority, Check, Low
 	}
-	If (Level = 2)
+	If (Priority = 2 or Priority = "B")
 	{
-		Level = B
+		Global ConfigPriority := "B"
 		Menu, Priority, Uncheck, Realtime
 		Menu, Priority, Uncheck, High
 		Menu, Priority, Uncheck, AboveNormal	
@@ -192,9 +267,9 @@ PriorityChangev2(Level)
 		Menu, Priority, Check, BelowNormal	
 		Menu, Priority, Uncheck, Low
 	}
-	If (Level = 3)
+	If (Priority = 3 or Priority = "N")
 	{
-		Level = N
+		Global ConfigPriority := "N"
 		Menu, Priority, Uncheck, Realtime
 		Menu, Priority, Uncheck, High
 		Menu, Priority, Uncheck, AboveNormal	
@@ -202,9 +277,9 @@ PriorityChangev2(Level)
 		Menu, Priority, Uncheck, BelowNormal	
 		Menu, Priority, Uncheck, Low
 	}
-	If (Level = 4)
+	If (Priority = 4 or Priority = "A")
 	{
-		Level = A
+		Global ConfigPriority := "A"
 		Menu, Priority, Uncheck, Realtime
 		Menu, Priority, Uncheck, High
 		Menu, Priority, Check, AboveNormal	
@@ -212,9 +287,9 @@ PriorityChangev2(Level)
 		Menu, Priority, Uncheck, BelowNormal	
 		Menu, Priority, Uncheck, Low
 	}
-	If (Level = 5)
+	If (Priority = 5 or Priority = "H")
 	{
-		Level = H
+		Global ConfigPriority := "H"
 		Menu, Priority, Uncheck, Realtime
 		Menu, Priority, Check, High
 		Menu, Priority, Uncheck, AboveNormal	
@@ -222,9 +297,9 @@ PriorityChangev2(Level)
 		Menu, Priority, Uncheck, BelowNormal	
 		Menu, Priority, Uncheck, Low
 	}
-	If (Level = 6)
+	If (Priority = 6 or Priority = "R")
 	{
-		Level = R
+		Global ConfigPriority := "R"
 		Menu, Priority, Check, Realtime
 		Menu, Priority, Uncheck, High
 		Menu, Priority, Uncheck, AboveNormal	
@@ -232,207 +307,20 @@ PriorityChangev2(Level)
 		Menu, Priority, Uncheck, BelowNormal	
 		Menu, Priority, Uncheck, Low
 	}
-	
-
-	global ffmpegPids := []
-	global tWorkerPids := []
-	global LocalPriority := Level
-;Find node workers and parent
-	for proc in ComObjGet("winmgmts:").ExecQuery("Select * from Win32_Process WHERE Name = 'Tdarr_Node.exe'")
-	{
-		name := proc.Name
-		cmd := proc.CommandLine
-		pid := proc.ProcessId
-		;msgbox name: %name%`n cmd: %pid%
-		Haystack := cmd
-		Needle := "worker"
-		If InStr(Haystack, Needle)
-			{
-				tWorkerPids.Push(pid)
-			}
-		else
-			{
-				global tParentPid := pid
-			}
-	}
-;Find ffmpegs
-	for proc in ComObjGet("winmgmts:").ExecQuery("Select * from Win32_Process WHERE Name = 'ffmpeg.exe'")
-	{
-		name := proc.Name
-		;cmd := proc.CommandLine
-		pid := proc.ProcessId
-		;msgbox name: %name%`n cmd: %pid%
-		ffmpegPids.Push(pid)
-	}
-	
-	
-;change parent
-	;msgbox Tdarr_Node parent pid is %tParentPid%
-	Process, Exist, % tParentPid
-	ParentNodePID := ErrorLevel
-	If (ParentNodePID > 0)
-	{
-		Process, Priority, % ParentNodePID, % LocalPriority
-	}
-	
-;change workers
-	for index, This_tWorker in tWorkerPids 
-	{
-		;MsgBox % "tWorker " . index . " is " . This_tWorker 
-		Process, Exist, % This_tWorker
-		ThisNodePID := ErrorLevel
-		If (ThisNodePID > 0)
-		{
-			Process, Priority, % ThisNodePID, % LocalPriority
-		}
-	}
-;change ffmpegs
-	for index, This_ffmpeg in ffmpegPids 
-	{
-		;MsgBox % "ffmpeg " . index . " is " . This_ffmpeg
-		Process, Exist, % This_ffmpeg
-		ThisFfmpegPID := ErrorLevel
-		If (ThisFfmpegPID > 0)
-		{
-			Process, Priority, % ThisFfmpegPID, % LocalPriority
-		}
-	}
-	
-	return
+	IniWrite, %ConfigPriority%, %A_ScriptDir%/%ScriptNameNoExt%.ini, Config, Priority
+return
 }
 
-CCC(CoreLimit)
-{
-	;InputBox, proc, proc, proc:
-	loop %CoreLimit%
-	{
-		if Binary
-			Binary=1%Binary%
-		else
-			Binary=1
-	}
-	;msgbox %Binary%
-	Decimal := Dec(Binary)
-	;msgbox % Decimal
-	Process, Exist, Tdarr_Node.exe
-	NodePID := ErrorLevel
-	If (NodePID > 0)
-	{
-		Affinity_Set(Decimal,NodePID)
-		EnvGet, ProcessorCount, NUMBER_OF_PROCESSORS
-		loop, %ProcessorCount%
-			Menu, Cores, Uncheck, %A_Index%
-		Menu, Cores, Check, %CoreLimit%
-	}
-	return
-}
-
-CCCv2(CoreLimit)
-{
-	IniWrite, %CoreLimit%, %A_ScriptDir%/%ScriptNameNoExt%.ini, Config, Core Limit
-	global ConfigCoreLimit := CoreLimit
-	loop %CoreLimit%
-	{
-		if CoreLimitBinary
-			CoreLimitBinary=1%CoreLimitBinary%
-		else
-			CoreLimitBinary=1
-	}
-	if (CLOrder = 1)
-	{
-		EnvGet, ProcessorCount, NUMBER_OF_PROCESSORS
-		if (CoreLimit <> ProcessorCount)
-		{
-			padding := ProcessorCount - CoreLimit
-			loop %padding%
-			{
-				CoreLimitBinary=%CoreLimitBinary%0
-			}
-		}
-	}
-	global CoreLimitDec := Dec(CoreLimitBinary)
-	
-	global ffmpegPids := []
-	global tWorkerPids := []
-	 
-;Find node workers and parent
-	for proc in ComObjGet("winmgmts:").ExecQuery("Select * from Win32_Process WHERE Name = 'Tdarr_Node.exe'")
-	{
-		name := proc.Name
-		cmd := proc.CommandLine
-		pid := proc.ProcessId
-		;msgbox name: %name%`n cmd: %pid%
-		Haystack := cmd
-		Needle := "worker"
-		If InStr(Haystack, Needle)
-			{
-				tWorkerPids.Push(pid)
-			}
-		else
-			{
-				global tParentPid := pid
-			}
-	}
-;Find ffmpegs
-	for proc in ComObjGet("winmgmts:").ExecQuery("Select * from Win32_Process WHERE Name = 'ffmpeg.exe'")
-	{
-		name := proc.Name
-		;cmd := proc.CommandLine
-		pid := proc.ProcessId
-		;msgbox name: %name%`n cmd: %pid%
-		ffmpegPids.Push(pid)
-	}
-	
-	
-;change parent
-	;msgbox Tdarr_Node parent pid is %tParentPid%
-	Process, Exist, % tParentPid
-	ParentNodePID := ErrorLevel
-	If (ParentNodePID > 0)
-	{
-		;msgbox parent cl = %CoreLimitDec%`npid = %ParentNodePID%
-		Affinity_Set(CoreLimitDec,ParentNodePID)
-		EnvGet, ProcessorCount, NUMBER_OF_PROCESSORS
-		loop, %ProcessorCount%
-			Menu, Cores, Uncheck, %A_Index%
-		Menu, Cores, Check, %CoreLimit%
-	}
-;change workers
-	for index, This_tWorker in tWorkerPids 
-	{
-		;MsgBox % "tWorker " . index . " is " . This_tWorker 
-		Process, Exist, % This_tWorker
-		ThisNodePID := ErrorLevel
-		If (ThisNodePID > 0)
-		{
-			Affinity_Set(CoreLimitDec,ThisNodePID)
-			EnvGet, ProcessorCount, NUMBER_OF_PROCESSORS
-			loop, %ProcessorCount%
-				Menu, Cores, Uncheck, %A_Index%
-			Menu, Cores, Check, %CoreLimit%
-		}
-	}
-;change ffmpegs
-	for index, This_ffmpeg in ffmpegPids 
-	{
-		;MsgBox % "ffmpeg " . index . " is " . This_ffmpeg
-		Process, Exist, % This_ffmpeg
-		ThisFfmpegPID := ErrorLevel
-		If (ThisFfmpegPID > 0)
-		{
-			Affinity_Set(CoreLimitDec,ThisFfmpegPID)
-			EnvGet, ProcessorCount, NUMBER_OF_PROCESSORS
-			loop, %ProcessorCount%
-				Menu, Cores, Uncheck, %A_Index%
-			Menu, Cores, Check, %CoreLimit%
-		}
-	}
-	
-	return
+GetPriority(P="current") {
+	static r32:="N", r64:="L", r128:="H" , r256:="R", r16384:="B", r32768:="A"
+	Process, Exist, % (P="current") ? "" : (P="") ? 0 : P
+	R := DllCall("GetPriorityClass","UInt",hP:=DllCall("OpenProcess","UInt",0x400,"Int",0,"UInt",(P+1) ? P : ErrorLevel))
+	DllCall("CloseHandle","UInt",hP)
+	return r%R%
 }
 
 
-Affinity_Set( CPU=1, PID=0x0 ) { ; CPU0=1 CPU1=2 | to use both, CPU should be 3
+Affinity_Set( CPU=1, PID=0x0 ) {
   Process, Exist, %PID%
   IfEqual,ErrorLevel,0,  SetEnv,PID,% DllCall( "GetCurrentProcessId" )
   hPr := DllCall( "OpenProcess",Int,1536,Int,0,Int,PID )  
@@ -443,16 +331,15 @@ Affinity_Set( CPU=1, PID=0x0 ) { ; CPU0=1 CPU1=2 | to use both, CPU should be 3
 Return ( Res="" ) ? 0 : Res
 }
 
-Bin(x){
-	while x
-		r:=1&x r,x>>=1
-	return r
-}
-Dec(x){
-	b:=StrLen(x),r:=0
-	loop,parse,x
-		r|=A_LoopField<<--b
-	return r
+Affinity_Get( PID=0x0 ) { ; 
+  Process, Exist, %PID%
+  IfEqual,ErrorLevel,0,  SetEnv,PID,% DllCall( "GetCurrentProcessId" )
+  hPr := DllCall( "OpenProcess",Int,1536,Int,0,Int,PID )  
+  af := DllCall( "GetProcessAffinityMask", Int,hPr, IntP,PAM, IntP,SAM )
+  ;If ( CPU>0 && CPU<=SAM )
+  ;   Res := DllCall( "SetProcessAffinityMask", Int,hPr, Int,CPU )
+  DllCall( "CloseHandle", Int,hPr )
+Return pam
 }
 
 ToggleClOrder:
@@ -468,20 +355,6 @@ ToggleClOrder:
 		Menu, Cores, Uncheck, Reverse
 	}
 	return
-}
-
-IsNodeRunning()
-{
-	Process, Exist, Tdarr_Node.exe
-	If ErrorLevel
-	{
-		Menu, Tray, Check, Run Node
-	}
-	else
-	{
-		Menu, Tray, Uncheck, Run Node
-	}
-	return NodePID
 }
 
 RunToggle:
@@ -574,21 +447,11 @@ ChangeWorkers(NodeID, NodeURL,WorkerType,ProcType)
 	}
 	msgbox will try to %process% by %amount%
 	loop, %amount%
-	{
-		endpoint := NodeURL "/api/v2/alter-worker-limit"
-		Try
-		{
-			whr := ComObjCreate("WinHttp.WinHttpRequest.5.1")
-			whr.Open("POST", endpoint)
-			whr.SetRequestHeader("Content-Type", "application/json")
-			body = {"data": {"workerType": "%WType%","process": "%process%","nodeID": "%NodeID%"}}
-			whr.Send(body)
-		}
-		;MsgBox % whr.ResponseText
-	}
+		AlterWorkerLimit(NodeURL, NodeID, WType, process)
+
 
 	gosub MenuWorkerRefresh
-
+	return
 }
 
 MenuWorkerRefresh:
@@ -670,18 +533,40 @@ TranscodesGPU(NodeID, NodeURL)
 IsNodePaused(NodeID, NodeURL)
 {
 	Nodes := GetNodes(NodeURL)
+	;ClipBoard := Nodes
 	NodeList := JsonToAHK(Nodes)
 	Node := NodeList[NodeID]
 	result := Node.nodePaused
+	if (result = -1)
+		result := true
+	else
+		result := false
+	;msgbox % result
 	return result
 }
 
+PauseNodeToggle:
+{
+	Status := IsNodePaused(NodeID, NodeURL)
+	if Status
+	{
+		Data := "{nodePaused: false}"
+		UpdateNode(NodeURL, NodeID, Data) 
+	}
+	else
+	{
+		Data := "{nodePaused: true}"
+		UpdateNode(NodeURL, NodeID, Data)
+	}
+	return
+}
+
+
+;;;http stuff
 
 GetNodes(NodeURL)
 {
-	;msgbox % NodeURL
 	endpoint := NodeURL "/api/v2/get-nodes"
-	;msgbox % endpoint
 	Try
 	{
 		HTTP := ComObjCreate("WinHttp.WinHttpRequest.5.1")
@@ -690,10 +575,67 @@ GetNodes(NodeURL)
 		HTTP.Send()
 		Response:=HTTP.ResponseText
 	}
-	;SciTE_Output(Response) ;Text,Clear=1,LineBreak=1,Exit=0}
+	;HTTP := "" ;unload com object
+	ObjRelease(HTTP)
 	return Response
 }
 
+
+UpdateNode(NodeURL, NodeID, Data)
+{
+	endpoint := NodeURL "/api/v2/update-node"
+	
+
+
+	;Try
+	;{
+		unp := ComObjCreate("WinHttp.WinHttpRequest.5.1")
+		unp.Open("POST", endpoint)
+		unp.SetRequestHeader("Content-Type", "application/json")
+		ubody = {"data": {nodeID: "%NodeID%", nodeUpdates: %Data%}}
+		msgbox % ubody
+		unp.Send(ubody)
+		Response := unp.ResponseText
+		msgbox % Response
+	;}
+	;unp := "" ;unload com object
+	ObjRelease(unp)
+	return Response
+}
+
+AlterWorkerLimit(NodeURL, NodeID, WType, process)
+{
+	endpoint := NodeURL "/api/v2/alter-worker-limit"
+	Try
+	{
+		wkr := ComObjCreate("WinHttp.WinHttpRequest.5.1")
+		wkr.Open("POST", endpoint)
+		wkr.SetRequestHeader("Content-Type", "application/json")
+		body = {"data": {"workerType": "%WType%","process": "%process%","nodeID": "%NodeID%"}}
+		wkr.Send(body)
+	}
+	;MsgBox % HTTP.ResponseText
+	ObjRelease(wkr)
+}
+
+;;;math
+
+
+Bin(x){
+	while x
+		r:=1&x r,x>>=1
+	return r
+}
+Dec(x){
+	b:=StrLen(x),r:=0
+	loop,parse,x
+		r|=A_LoopField<<--b
+	return r
+}
+
+
+
+;;;json stuff
 
 JsonToAHK(json, rec := false) { 
    static doc := ComObjCreate("htmlfile") 
