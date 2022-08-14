@@ -8,7 +8,7 @@ SplitPath, A_ScriptFullPath, ScriptFileName, ScriptDir, ScriptExtension, ScriptN
 
 global ScriptNameNoExt
 
-
+;read script configs, or create
 IfNotExist, %A_ScriptDir%/%ScriptNameNoExt%.ini
 {
 	;IniWrite, Value, Filename, Section, Key
@@ -17,48 +17,114 @@ IfNotExist, %A_ScriptDir%/%ScriptNameNoExt%.ini
 	IniWrite, %ProcessorCount%, %A_ScriptDir%/%ScriptNameNoExt%.ini, Config, Core Limit
 	IniWrite, 3, %A_ScriptDir%/%ScriptNameNoExt%.ini, Config, Priority
 	IniWrite, 1, %A_ScriptDir%/%ScriptNameNoExt%.ini, Config, Reverse Core Limit
+	IniWrite, 1, %A_ScriptDir%/%ScriptNameNoExt%.ini, Config, Autostart %ScriptNameNoExt%
 	IniWrite, 1, %A_ScriptDir%/%ScriptNameNoExt%.ini, Config, Apply On Start
+	IniWrite, 750, %A_ScriptDir%/%ScriptNameNoExt%.ini, Config, ffmpeg check interval (in miliseconds)
 }
 
-;IniRead, OutputVar, Filename, Section, Key
 IniRead, ConfigCoreLimit, %A_ScriptDir%/%ScriptNameNoExt%.ini, Config, Core Limit
 IniRead, ConfigPriority, %A_ScriptDir%/%ScriptNameNoExt%.ini, Config, Priority
 IniRead, CLorder, %A_ScriptDir%/%ScriptNameNoExt%.ini, Config, Reverse Core Limit
+IniRead, AutostartTNC, %A_ScriptDir%/%ScriptNameNoExt%.ini, Config, Autostart %ScriptNameNoExt%
 IniRead, AutoApplyOnStart, %A_ScriptDir%/%ScriptNameNoExt%.ini, Config, Apply On Start
+IniRead, ChkInt, %A_ScriptDir%/%ScriptNameNoExt%.ini, Config, ffmpeg check interval (in miliseconds)
 
 Global ConfigCoreLimit
 Global ConfigPriority
 Global CLorder
+Global ChkInt
+Global AutostartTNC
 
+;TODO check if installed correctly, maybe install
+
+;read node config
 FileRead, NodeConfigJson, %A_ScriptDir%/../configs/Tdarr_Node_Config.json
-;msgbox % NodeConfigJson
 NodeConfig := JsonToAHK(NodeConfigJson)
 NodeID := NodeConfig.nodeID
 NodeIP := NodeConfig.serverIP
 NodePort:= NodeConfig.serverPort
 NodeURL = http://%NodeIP%:%NodePort%
-global CLOrder
-;msgbox % NodeURL
+
+;start
 gosub MenuInit
 gosub Init
 
-ChkInt := 750
+
 
 SetTimer, PIDMonitor, %ChkInt%
 
-;SetTimer, NodeRunningMonitor, 3000
-;SetTimer, NodePausedMonitor, 3000
-;SetTimer, WorkerLimits, 15000
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;Functions;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 return
+init:
+{
+	gosub AutostartCheck
+	AfSet(ConfigCoreLimit)
+	PrioSet(ConfigPriority)
+	
+return
+}
 
+AutostartTNC:
+{
+	;If A_IsCompiled
+	;{
+		IfExist, %A_Startup%\%ScriptNameNoExt%.lnk 
+		{
+			FileDelete, %A_Startup%\%ScriptNameNoExt%.lnk 
+			gosub AutostartCheck
+		}
+		else
+		{
+			FileCreateShortcut, %ScriptNameNoExt%.exe, %A_Startup%\%ScriptNameNoExt%.lnk , %A_ScriptDir%, , Starts %ScriptNameNoExt%, , , , 
+			gosub AutostartCheck
+		}
+	;}
+return
+}
+
+AutostartCheck:
+{
+	;If A_IsCompiled
+	;{
+		IfExist, %A_Startup%\%ScriptNameNoExt%.lnk 
+			{ 
+				Menu, Autostart, Check, Autostart %ScriptNameNoExt%
+				Menu, Autostart, Enable, Autostart Tdarr Node
+			}
+			else
+			{
+				Menu, Autostart, Uncheck, Autostart %ScriptNameNoExt%
+				Menu, Autostart, Disable, Autostart Tdarr Node
+			}
+	;}
+return
+}
+
+AutostartNodeCheck:
+{
+	
+	
+	return
+}
+
+DoNothing:
+	return
 
 MenuInit:
 {
 	If !A_IsCompiled
 		Menu, Tray, Add
 	
+	IfNotExist, Tdarr_Logo.png
+		Try
+			UrlDownloadToFile, %NodeURL%/images/updates/logo3-small.png, Tdarr_Logo.png
+		
+	IfExist, Tdarr_Logo.png	
+		Menu, Tray, Icon, Tdarr_Logo.png
+		
+	Menu, Tray, Add, Controlling %NodeID% node on %NodeURL%,DoNothing
+	Menu, Tray, Add
+	Menu, Tray, Disable, Controlling %NodeID% node on %NodeURL%
 	Menu, Tray, Add, Run Node, RunToggle
 	;Menu, Tray, Add, Pause Node, PauseNodeToggle
 	Menu, Tray, Add, Show Console, ShowToggle
@@ -88,18 +154,53 @@ MenuInit:
 	EnvGet, ProcessorCount, NUMBER_OF_PROCESSORS
 	loop, %ProcessorCount%
 	{
-		;CCC%A_Index% := Func("CCCv2").Bind(A_Index)
 		AfSet%A_Index% := Func("AfSet").Bind(A_Index)
 		Menu, Cores, Add, %A_Index%, % AfSet%A_Index%
 	}
+	
+	;30 mins
+	loop, %ProcessorCount%
+	{
+		30AfSet%A_Index% := Func("TimedAfSet").Bind(A_Index, 30)
+		Menu, 30MinCores, Add, %A_Index%, % 30AfSet%A_Index%
+	}
+	Menu, TimedCores, Add, 30 Mins, :30MinCores
+	
+	;60 mins
+	loop, %ProcessorCount%
+	{
+		60AfSet%A_Index% := Func("TimedAfSet").Bind(A_Index, 60)
+		Menu, 60MinCores, Add, %A_Index%, % 60AfSet%A_Index%
+	}
+	Menu, TimedCores, Add, 1 Hr, :60MinCores
+	
+	;120 mins
+	loop, %ProcessorCount%
+	{
+		120AfSet%A_Index% := Func("TimedAfSet").Bind(A_Index, 120)
+		Menu, 120MinCores, Add, %A_Index%, % 120AfSet%A_Index%
+	}
+	Menu, TimedCores, Add, 2 Hrs, :120MinCores
+	
+	;240 mins
+	loop, %ProcessorCount%
+	{
+		240AfSet%A_Index% := Func("TimedAfSet").Bind(A_Index, 240)
+		Menu, 240MinCores, Add, %A_Index%, % 240AfSet%A_Index%
+	}
+	Menu, TimedCores, Add, 4 Hrs, :240MinCores
+	
 	Menu, Cores, Add
 	Menu, Cores, Add, Reverse, ToggleClOrder
 	if (CLOrder = 0)
 		Menu, Cores, Uncheck, Reverse
 	else
 		Menu, Cores, Check, Reverse
-		
+	
+	
 	Menu, Cores, Check, %ProcessorCount%
+	Menu, Cores, Add
+	Menu, Cores, Add, Timers, :TimedCores
 	Menu, Tray, Add, Core Limit, :Cores
 	
 ;need to make priority control menu
@@ -117,26 +218,91 @@ MenuInit:
 	p1 := Func("PrioSet").Bind("L")
 	Menu, Priority, Add, Low, % p1
 	Menu, Tray, Add, Priority, :Priority
-
+	
+	
+	;30 mins
+	30p6 := Func("TimedPrioSet").Bind("R", 30)
+	Menu, 30Priority, Add, Realtime, % 30p6
+	30p5 := Func("TimedPrioSet").Bind("H", 30)
+	Menu, 30Priority, Add, High, % 30p5
+	30p4 := Func("TimedPrioSet").Bind("A", 30)
+	Menu, 30Priority, Add, AboveNormal, % 30p4
+	30p3 := Func("TimedPrioSet").Bind("N", 30)
+	Menu, 30Priority, Add, Normal, % 30p3
+	30p2 := Func("TimedPrioSet").Bind("B", 30)
+	Menu, 30Priority, Add, BelowNormal, % 30p2
+	30p1 := Func("TimedPrioSet").Bind("L", 30)
+	Menu, 30Priority, Add, Low, % 30p1
+	Menu, TimedPriorities, Add, 30 Mins, :30Priority
+	
+	;60 mins
+	60p6 := Func("TimedPrioSet").Bind("R", 60)
+	Menu, 60Priority, Add, Realtime, % 60p6
+	60p5 := Func("TimedPrioSet").Bind("H", 60)
+	Menu, 60Priority, Add, High, % 60p5
+	60p4 := Func("TimedPrioSet").Bind("A", 60)
+	Menu, 60Priority, Add, AboveNormal, % 60p4
+	60p3 := Func("TimedPrioSet").Bind("N", 60)
+	Menu, 60Priority, Add, Normal, % 60p3
+	60p2 := Func("TimedPrioSet").Bind("B", 60)
+	Menu, 60Priority, Add, BelowNormal, % 60p2
+	60p1 := Func("TimedPrioSet").Bind("L", 60)
+	Menu, 60Priority, Add, Low, % 60p1
+	Menu, TimedPriorities, Add, 1hr, :60Priority
+	
+	
+	;120 mins
+	120p6 := Func("TimedPrioSet").Bind("R", 120)
+	Menu, 120Priority, Add, Realtime, % 120p6
+	120p5 := Func("TimedPrioSet").Bind("H", 120)
+	Menu, 120Priority, Add, High, % 120p5
+	120p4 := Func("TimedPrioSet").Bind("A", 120)
+	Menu, 120Priority, Add, AboveNormal, % 120p4
+	120p3 := Func("TimedPrioSet").Bind("N", 120)
+	Menu, 120Priority, Add, Normal, % 120p3
+	120p2 := Func("TimedPrioSet").Bind("B", 120)
+	Menu, 120Priority, Add, BelowNormal, % 120p2
+	120p1 := Func("TimedPrioSet").Bind("L", 120)
+	Menu, 120Priority, Add, Low, % 120p1
+	Menu, TimedPriorities, Add, 2hr, :120Priority
+	
+	
+	;240 mins
+	240p6 := Func("TimedPrioSet").Bind("R", 240)
+	Menu, 240Priority, Add, Realtime, % 240p6
+	240p5 := Func("TimedPrioSet").Bind("H", 240)
+	Menu, 240Priority, Add, High, % 240p5
+	240p4 := Func("TimedPrioSet").Bind("A", 240)
+	Menu, 240Priority, Add, AboveNormal, % 240p4
+	240p3 := Func("TimedPrioSet").Bind("N", 240)
+	Menu, 240Priority, Add, Normal, % 240p3
+	240p2 := Func("TimedPrioSet").Bind("B", 240)
+	Menu, 240Priority, Add, BelowNormal, % 240p2
+	240p1 := Func("TimedPrioSet").Bind("L", 240)
+	Menu, 240Priority, Add, Low, % 240p1
+	Menu, TimedPriorities, Add, 4hr, :240Priority	
+	
+	Menu, Priority, Add
+	Menu, Priority, Add, Timers, :TimedPriorities
+	
+	Menu, Autostart, Add, Autostart %ScriptNameNoExt%, AutostartTNC
+	Menu, Autostart, Add, Autostart Tdarr Node, AutostartTNC
+	
     If A_IsCompiled
 	{
-	Menu, Tray, NoDefault
-	Menu, Tray, NoStandard
-	
-	Menu, Tray, Add
-	Menu, Tray, Add, Exit TNC, ExitNow
-	;Menu, Tray, Add, Exit TNC and kill node, KillNodeAndExit
+		Menu, Tray, NoDefault
+		Menu, Tray, NoStandard
+		Menu, Tray, Add
+		Menu, Tray, Add, Autostart, :Autostart
+		Menu, Tray, Add
+		
+		Menu, Tray, Add, Exit TNC, ExitNow
+		;Menu, Tray, Add, Exit TNC and kill node, KillNodeAndExit
 	}
 	return
 }
 
-init:
-{
-	AfSet(ConfigCoreLimit)
-	PrioSet(ConfigPriority)
 
-return
-}
 PIDMonitor:
 {
 	
@@ -144,7 +310,7 @@ PIDMonitor:
 
 	global ffmpegPids := []
 	
-	;;;;;;;;;;Find node workers and parent
+	;Find node workers and parent
 	for proc in ComObjGet("winmgmts:").ExecQuery("Select * from Win32_Process WHERE Name = 'Tdarr_Node.exe'")
 	{
 		name := proc.Name
@@ -157,23 +323,23 @@ PIDMonitor:
 				continue
 		else
 				global tParentPid := pid
-	}
-	ObjRelease(proc)
+	ObjRelease(proc) 
 	ObjRelease(cmd)
+	}
+	
 	if (tParentPid > 0)
 		Menu, Tray, Check, Run Node
 	else
 		Menu, Tray, Uncheck, Run Node
 
-	;;;;;;;;;;;Find ffmpegs
+	;Find ffmpegs
 	for proc in ComObjGet("winmgmts:").ExecQuery("Select * from Win32_Process WHERE Name = 'ffmpeg.exe'")
 	{
 		pid := proc.ProcessId
 		ffmpegPids.Push(pid)
+		ObjRelease(proc)
 	}
-	ObjRelease(proc)
 	
-	;;;;;;;;;;;change ffmpegs affinity
 	for index, This_ffmpeg in ffmpegPids 
 	{
 		;MsgBox % "ffmpeg " . index . " is " . This_ffmpeg
@@ -182,31 +348,32 @@ PIDMonitor:
 		;msgbox pid is %ThisFfmpegPID%
 		If (ThisFfmpegPID > 0)
 		{
+			;change ffmpegs affinity
 			CurrentAf := Affinity_Get(ThisFfmpegPID)
-			;msgbox %ThisFfmpegPID%'s affinity is %CurrentAF%, config is %ConfigCoreLimitDec%
 			if (CurrentAf = ConfigCoreLimitDec)
 				continue
 			else
 				Affinity_Set(ConfigCoreLimitDec,ThisFfmpegPID)
-
-		}
-	}
-
-	;;;;;;;;;;;change ffmpegs priority
-	for index, This_ffmpeg in ffmpegPids 
-	{
-		;MsgBox % "ffmpeg " . index . " is " . This_ffmpeg
-		Process, Exist, % This_ffmpeg
-		ThisFfmpegPID := ErrorLevel
-		If (ThisFfmpegPID > 0)
-		{
+			
+			;change ffmpegs priority
 			CurrentPrio := GetPriority(ThisFfmpegPID)
 			if (CurrentPrio = ConfigPriority)
 				continue
-			Process, Priority, % ThisFfmpegPID, % ConfigPriority
-
+			else
+				Process, Priority, % ThisFfmpegPID, % ConfigPriority
 		}
 	}
+	return
+}
+
+TimedAfSet(TempAffinity, Mins)
+{
+	MSec := Mins * -60000
+	AffinityBefore := ConfigCoreLimit
+	AfSet(TempAffinity)
+	SetAfBefore := Func("AfSet").Bind(AffinityBefore)
+	SetTimer, % SetAfBefore, % MSec
+	
 	return
 }
 
@@ -239,10 +406,21 @@ AfSet(Affinity)
 	loop, %ProcessorCount%
 		Menu, Cores, Uncheck, %A_Index%
 	Menu, Cores, Check, %ConfigCoreLimit%
-	
-
-return
+	return
 }
+
+
+TimedPrioSet(TempPriority, Mins)
+{
+	MSec := Mins * -60000
+	PrioBefore := ConfigPriority
+	PrioSet(TempPriority)
+	SetPrioBefore := Func("PrioSet").Bind(PrioBefore)
+	SetTimer, % SetPrioBefore, % MSec
+	
+	return
+}
+
 
 PrioSet(Priority)
 {
@@ -308,10 +486,11 @@ PrioSet(Priority)
 		Menu, Priority, Uncheck, Low
 	}
 	IniWrite, %ConfigPriority%, %A_ScriptDir%/%ScriptNameNoExt%.ini, Config, Priority
-return
+	return
 }
 
-GetPriority(P="current") {
+GetPriority(P="current") 
+{
 	static r32:="N", r64:="L", r128:="H" , r256:="R", r16384:="B", r32768:="A"
 	Process, Exist, % (P="current") ? "" : (P="") ? 0 : P
 	R := DllCall("GetPriorityClass","UInt",hP:=DllCall("OpenProcess","UInt",0x400,"Int",0,"UInt",(P+1) ? P : ErrorLevel))
@@ -319,8 +498,8 @@ GetPriority(P="current") {
 	return r%R%
 }
 
-
-Affinity_Set( CPU=1, PID=0x0 ) {
+Affinity_Set( CPU=1, PID=0x0 ) 
+{
   Process, Exist, %PID%
   IfEqual,ErrorLevel,0,  SetEnv,PID,% DllCall( "GetCurrentProcessId" )
   hPr := DllCall( "OpenProcess",Int,1536,Int,0,Int,PID )  
@@ -331,7 +510,8 @@ Affinity_Set( CPU=1, PID=0x0 ) {
 Return ( Res="" ) ? 0 : Res
 }
 
-Affinity_Get( PID=0x0 ) { ; 
+Affinity_Get( PID=0x0 ) 
+{ 
   Process, Exist, %PID%
   IfEqual,ErrorLevel,0,  SetEnv,PID,% DllCall( "GetCurrentProcessId" )
   hPr := DllCall( "OpenProcess",Int,1536,Int,0,Int,PID )  
@@ -339,7 +519,7 @@ Affinity_Get( PID=0x0 ) { ;
   ;If ( CPU>0 && CPU<=SAM )
   ;   Res := DllCall( "SetProcessAffinityMask", Int,hPr, Int,CPU )
   DllCall( "CloseHandle", Int,hPr )
-Return pam
+Return PAM
 }
 
 ToggleClOrder:
@@ -348,11 +528,13 @@ ToggleClOrder:
 	{
 		global CLOrder := 1
 		Menu, Cores, Check, Reverse
+		IniWrite, %CLOrder%, %A_ScriptDir%/%ScriptNameNoExt%.ini, Config, Reverse Core Limit
 	}
 	else
 	{
 		global CLOrder := 0
 		Menu, Cores, Uncheck, Reverse
+		IniWrite, %CLOrder%, %A_ScriptDir%/%ScriptNameNoExt%.ini, Config, Reverse Core Limit
 	}
 	return
 }
@@ -378,6 +560,8 @@ RunToggle:
 			Run, Tdarr_Node.exe, %A_ScriptDir%, , NodePID
 		else 
 			Run, Tdarr_Node.exe, %A_ScriptDir%, Hide, NodePID
+			
+		gosub MenuWorkerRefresh
 	}
 	return
 }
@@ -423,6 +607,7 @@ ChangeWorkers(NodeID, NodeURL,WorkerType,ProcType)
 			CurrentValue := TranscodesCPU(NodeID, NodeURL)
 		WType = %WType%cpu
 	}
+	
 	if (ProcType = 2)
 	{
 		if (WorkerType = 1)
@@ -445,10 +630,9 @@ ChangeWorkers(NodeID, NodeURL,WorkerType,ProcType)
 		process := "decrease"
 		amount := (CurrentValue - NewValue)
 	}
-	msgbox will try to %process% by %amount%
+	
 	loop, %amount%
 		AlterWorkerLimit(NodeURL, NodeID, WType, process)
-
 
 	gosub MenuWorkerRefresh
 	return
@@ -575,19 +759,14 @@ GetNodes(NodeURL)
 		HTTP.Send()
 		Response:=HTTP.ResponseText
 	}
-	;HTTP := "" ;unload com object
 	ObjRelease(HTTP)
 	return Response
 }
 
-
+;todo: fix this shit
 UpdateNode(NodeURL, NodeID, Data)
 {
 	endpoint := NodeURL "/api/v2/update-node"
-	
-
-
-	;Try
 	;{
 		unp := ComObjCreate("WinHttp.WinHttpRequest.5.1")
 		unp.Open("POST", endpoint)
@@ -618,7 +797,7 @@ AlterWorkerLimit(NodeURL, NodeID, WType, process)
 	ObjRelease(wkr)
 }
 
-;;;math
+;math
 
 
 Bin(x){
@@ -634,8 +813,6 @@ Dec(x){
 }
 
 
-
-;;;json stuff
 
 JsonToAHK(json, rec := false) { 
    static doc := ComObjCreate("htmlfile") 
